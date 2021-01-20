@@ -291,20 +291,9 @@ def visualize_calibration(cam1, cam2, trajectory_3d):
 
   # Add trajectory_3d if exists
   if trajectory_3d is not None:
-    trajectory_3d[:, [1, 2]] *= -1
-    trajectory_3d = transf_utils.transform_3d(m=cam_list[0].to_opengl()[0], pts=trajectory_3d)
-    print("Transformed : ", trajectory_3d)
-
     trajectory_3d_sp = gl.GLScatterPlotItem()
-    color = np.zeros((trajectory_3d.shape[0], 4), dtype=np.float32)
     trajectory_3d_sp.setData(pos=trajectory_3d, size=5)
     view.addItem(trajectory_3d_sp)
-
-    def update():
-      ## Animate the trajectory by update the color
-      color = np.roll(color, 1, axis=0)
-      trajectory_3d_sp.setData(color=color)
-
 
   # Run Qt
   if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):

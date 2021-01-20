@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import os
+import matplotlib.pyplot as plt
 from . import transform
 from . import geometric
 
@@ -8,6 +9,7 @@ def triangulate_points(cam1, cam2, tracking):
   E1, P1 = cam1.to_opencv()
   E2, P2 = cam2.to_opencv()
   # Opencv need trasformation from left to right camera
+  # Relative E = E2 @ E1_inv @ points(in cam1 coordinates)
   relative_E = E2 @ np.linalg.inv(E1)
   # print("Relative E:", relative_E)
   # print("E1:", E1)
@@ -18,22 +20,42 @@ def triangulate_points(cam1, cam2, tracking):
   # print("Trianglulate P2:", get_triangulation_params(cam=cam2, E=relative_E, main=False))
   trajectory_3d = cv2.triangulatePoints(projMatr1=get_triangulation_params(cam=cam1, main=True), projMatr2=get_triangulation_params(cam=cam2, E=relative_E, main=False), projPoints1=tracking[:, [0, 1]].T, projPoints2=tracking[:, [2, 3]].T).T
   trajectory_3d /= trajectory_3d[:, [-1]]
-  test_trinangulate_points(trajectory_3d=trajectory_3d[:, :-1].copy(), tracking=tracking, cam1=cam1, cam2=cam2)
-  # exit()
-  return trajectory_3d[:, :-1]
+  # eval_trinangulate_points(trajectory_3d=trajectory_3d[:, :-1].copy(), tracking=tracking, cam1=cam1, cam2=cam2)
+  return trajectory_3d
 
-def test_trinangulate_points(trajectory_3d, tracking, cam1, cam2):
-  print(trajectory_3d)
+def eval_trinangulate_points(trajectory_3d, tracking, cam1, cam2):
   trajectory_3d = transform.transform_3d(m=cam1.to_opencv()[0], pts=trajectory_3d, inv=True)
-  print("Trianglulate : ", trajectory_3d)
-  print("Tracking C1 : ", tracking[:, [0, 1]])
-  print("Tracking C1 (Checksum) : ", np.sum(tracking[:, [0, 1]]))
-  print("Project triangulation C1 :", cam1.project(points3d=trajectory_3d)[0])
-  print("Project triangulation C1 (Checksum) :", np.sum(cam1.project(points3d=trajectory_3d)[0]))
-  print("Tracking C2 : ", tracking[:, [2, 3]])
-  print("Tracking C2 : (Checksum) : ", np.sum(tracking[:, [2, 3]]))
-  print("Project triangulation C2 :", cam2.project(points3d=trajectory_3d)[0])
-  print("Project triangulation C2 (Checksum):", np.sum(cam2.project(points3d=trajectory_3d)[0]))
+  mse_projection_c1 = np.mean((tracking[:, [0, 1]] - cam1.project(points3d=trajectory_3d)[0])**2)
+  mse_projection_c2 = np.mean((tracking[:, [2, 3]] - cam2.project(points3d=trajectory_3d)[0])**2)
+  # print("Trianglulate : ", trajectory_3d)
+  # print("Tracking C1 : ", tracking[:, [0, 1]])
+  # print("Project triangulation C1 :", cam1.project(points3d=trajectory_3d)[0])
+  print("==>Tracking C1 (Checksum) : ", np.sum(tracking[:, [0, 1]]))
+  print("==>Project triangulation C1 (Checksum) :", np.sum(cam1.project(points3d=trajectory_3d)[0]))
+  print("==>MSE Projection C1 : ", mse_projection_c1)
+  print("==>RMSE Projection C1 : ", np.sqrt(mse_projection_c1))
+  # print==>("Tracking C2 : ", tracking[:, [2, 3]])
+  # print==>("Project triangulation C2 :", cam2.project(points3d=trajectory_3d)[0])
+  print("==>Tracking C2 : (Checksum) : ", np.sum(tracking[:, [2, 3]]))
+  print("==>Project triangulation C2 (Checksum):", np.sum(cam2.project(points3d=trajectory_3d)[0]))
+  print("==>MSE Projection C2 : ", mse_projection_c2)
+  print("==>RMSE Projection C2 : ", np.sqrt(mse_projection_c2))
+
+  # Plotting its projection
+  fig, axes = plt.subplots(1, 2)
+  # Cam 1
+  axes[0].scatter(x=tracking[:, [0]], y=tracking[:, [1]], c='b', marker='o', label='Tracking', alpha=0.3)
+  projection = cam1.project(points3d=trajectory_3d)[0]
+  axes[0].scatter(x=projection[:, 0], y=projection[:, 1], c='r', marker='o', label='Projection', alpha=0.5)
+  axes[0].set_title('cam1')
+  axes[0].legend()
+  # Cam 2
+  axes[1].scatter(x=tracking[:, [2]], y=tracking[:, [3]], c='b', marker='o', label='Tracking', alpha=0.3)
+  projection = cam2.project(points3d=trajectory_3d)[0]
+  axes[1].scatter(x=projection[:, 0], y=projection[:, 1], c='r', marker='o', label='Projection', alpha=0.5)
+  axes[1].set_title('cam2')
+  axes[1].legend()
+  plt.show()
 
 
 def get_triangulation_params(cam, E=None, main=False):
@@ -43,7 +65,6 @@ def get_triangulation_params(cam, E=None, main=False):
     E = E[:-1, :]
 
   I = cam.to_opencv()[1][:-1, :-1]
-  print(I @ E)
   return I @ E
 
 def grid_search_focal_length(points3d, points2d, h, w, same_f=False, fx_step=20):
@@ -347,6 +368,35 @@ class Camera:
         modelview[2, (0, 3)] *= 1
 
         return modelview, projection
+
+    def to_unity(self, znear=0.1, zfar=1000):
+
+        modelview = np.zeros((4, 4))
+        projection = np.zeros((4, 4))
+
+        fx, fy, cx, cy = self.A[0, 0], self.A[1, 1], self.A[0, 2], self.A[1, 2]
+        h, w = self.height, self.width
+
+        projection[0, 0], projection[1, 1] = fx / cx, fy / cy
+        projection[2, 2], projection[2, 3] = -(znear + zfar) / (zfar - znear), (-2 * znear * zfar) / (zfar - znear)
+        projection[3, 2] = -1
+
+        modelview[0:3, 0:3] = self.R
+        modelview[0:3, 3] = self.T[:, 0]
+        # Inverse translation
+        modelview[1, :] *= -1
+        modelview[2, :] *= -1
+
+        modelview[3, 3] = 1
+        modelview[0, (1, 2)] *= 1
+        modelview[1, (0, 3)] *= 1
+        modelview[2, (0, 3)] *= 1
+
+        # @ 18/1/2021 : I'm still curious why invert only z component is enough.
+        modelview[:-1, 2]*=-1
+
+        return modelview, projection
+
 
     def to_opencv(self):
         modelview = np.zeros((4, 4))

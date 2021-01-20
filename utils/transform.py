@@ -156,5 +156,24 @@ def transform_3d(m, pts, inv=True):
   pts_transformed = pts @ m.T
   return pts_transformed[:, :-1]
 
+def project(cam, pts, use_ndc=False):
+  # Points
+  world = np.concatenate((pts[..., [0, 1, 2]], np.ones(shape=(pts.shape[0], 1))), axis=1)
+  # Transformation
+  E, I = cam.to_unity()
+  I[2, :] = I[3, :]
+  I[3, :] = np.array([0, 0, 0, 1])
+  width = cam.width
+  height = cam.height
+  transformation = (I @ E)
+  ndc = (world  @ transformation.T)
+  if use_ndc:
+    u = (ndc[:, [0]] / ndc[:, [2]] + 1 ) * 0.5
+    v = (ndc[:, [1]] / ndc[:, [2]] + 1 ) * 0.5
+  else:
+    u = (((ndc[:, [0]] / ndc[:, [2]] + 1 ) * 0.5) * width)
+    v = (((ndc[:, [1]] / ndc[:, [2]] + 1 ) * 0.5) * height)
 
+  d = ndc[:, [2]]
+  return u, v, d
 

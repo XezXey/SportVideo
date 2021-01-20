@@ -24,8 +24,10 @@ args = parser.parse_args()
 
 if __name__ == '__main__':
   sv = SportVideo.SportVideo(path_to_video=[args.first_vid, args.second_vid], out_name=args.out_name, field_img_path=args.field_template, args=args)
-  calib = join(sv.path_to_calibration, 'calib', 'calib_manual.npy')
-  if exists(calib):
+  calib_npy = join(sv.path_to_calibration, 'calib', 'calib_manual.npy')
+  if exists(calib_npy):
     sv.visualize_calibration()
   else:
     sv.calibrate_camera()
+
+  sv.convert_calibration_to_unity()

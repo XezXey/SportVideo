@@ -20,6 +20,7 @@ parser.add_argument('--field_template', type=str, required=True)
 parser.add_argument('--out_name', type=str, required=True)
 parser.add_argument('--ransac', type=int, default=0)
 parser.add_argument('--ext', type=str, default='csv')
+parser.add_argument('--use_tracking', action='store_true', default=False)
 args = parser.parse_args()
 
 
@@ -28,5 +29,7 @@ if __name__ == '__main__':
   calib = join(sv.path_to_calibration, 'calib', 'calib_manual.npy')
   tracking_1 = args.first_vid[:-4] + '.{}'.format(args.ext)
   tracking_2 = args.second_vid[:-4] + '.{}'.format(args.ext)
-  trajectory_3d = sv.extract_3d_tracking(tracking_1, tracking_2)
-  sv.visualize_calibration(trajectory_3d=trajectory_3d)
+  trajectory_3d, tracking = sv.extract_3d_tracking(tracking_1, tracking_2)
+  # sv.visualize_calibration(trajectory_3d=trajectory_3d)
+  trajectory = sv.split_trajectory(trajectory_3d=trajectory_3d, tracking=tracking)
+  sv.preprocess_save_to_npy(trajectory)

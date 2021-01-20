@@ -11,8 +11,9 @@ def visualize_video(vid_list, track_list=None):
   frame_counter = 0
   if track_list is not None:
     tracking = read_tracking(track_list)
-  for v in vid_list:
+  for i, v in enumerate(vid_list):
     cap_list.append(cv2.VideoCapture(v))
+    print("Video \"{}\" : Frame rate = {}, Resolution = {}x{}".format(v, cap_list[i].get(cv2.CAP_PROP_FPS), cap_list[i].get(cv2.CAP_PROP_FRAME_WIDTH), cap_list[i].get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
   while(is_cap_open(cap_list)):
     # Display frame-by-frame

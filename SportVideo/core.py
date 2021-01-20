@@ -14,6 +14,7 @@ from SportVideo import calibration
 import utils.io as io
 import utils.camera as cam_utils
 import utils.trajectory as traj_utils
+import utils.transform as transf_utils
 
 
 class SportVideo:
@@ -134,7 +135,7 @@ class SportVideo:
 
   def write_calibs(self, A, R, T, points, suffix):
     print("[#] Saving calibration dict : ", suffix)
-    calibs_dict = {self.video_name[0]:{'A':None, 'R':None, 'T':None, 'P2d':None, 'P3d':None, 'H':None, 'W':None},
+    calibs_dict_npy = {self.video_name[0]:{'A':None, 'R':None, 'T':None, 'P2d':None, 'P3d':None, 'H':None, 'W':None},
                    self.video_name[1]:{'A':None, 'R':None, 'T':None, 'P2d':None, 'P3d':None, 'H':None, 'W':None}}
     for i, vid_name in enumerate(self.video_name):
       calibs_dict[vid_name]['A'] = A[i].tolist()
@@ -145,8 +146,9 @@ class SportVideo:
       calibs_dict[vid_name]['H'] = self.h
       calibs_dict[vid_name]['W'] = self.w
 
-    calib = join(self.path_to_calibration, 'calib', 'calib_{}'.format(suffix))
-    np.save(calib, calibs_dict)
+    # .npy format (For extracting 3d trajectory)
+    calib_npy = join(self.path_to_calibration, 'calib', 'calib_{}'.format(suffix))
+    np.save(calib_npy, calibs_dict)
 
   def load_calibs(self, suffix):
     print("[#] Loading calibration dict : ", suffix)
@@ -178,7 +180,33 @@ class SportVideo:
       tracking[:, 2] = self.w - tracking[:, 2]    # Inverse the tracking for 2nd video
 
     trajectory_3d = cam_utils.triangulate_points(cam1=cam1_obj, cam2=cam2_obj, tracking=tracking)
-    return trajectory_3d
+    # Output 3D trajectory is in Camera 1 coordinates, so we move it to world coordinates
+    trajectory_3d[:, [1, 2]] *= -1 # Invert y-z axis
+    trajectory_3d = transf_utils.transform_3d(m=cam1_obj.to_opengl()[0], pts=trajectory_3d[:, :-1], inv=True)
+    return trajectory_3d, tracking
+
+  def convert_calibration_to_unity(self):
+    print("[#] Convert the calibration to Unity (Json format)")
+    calibs = self.load_calibs(suffix='manual')
+    cam1 = calibs[self.video_name[0]]
+    cam1_obj = cam_utils.Camera(name='cam1', A=np.array(cam1['A']), R=np.array(cam1['R']), T=np.array(cam1['T']), h=cam1['H'], w=cam1['W'])
+    cam2 = calibs[self.video_name[1]]
+    cam2_obj = cam_utils.Camera(name='cam2', A=np.array(cam2['A']), R=np.array(cam2['R']), T=np.array(cam2['T']), h=cam2['H'], w=cam2['W'])
+
+    calibs_json = {"firstCam":{"width":None, "height":None, "projectionMatrix":None, "worldToCameraMatrix":None},
+                   "secondCam":{"width":None, "height":None, "projectionMatrix":None, "worldToCameraMatrix":None}}
+
+    cam_obj = [cam1_obj, cam2_obj]
+    cam_list = ["firstCam", "secondCam"]
+    for i, vid_name in enumerate(cam_list):
+      calibs_json[vid_name]['width'] = cam_obj[i].width
+      calibs_json[vid_name]['height'] = cam_obj[i].height
+      calibs_json[vid_name]['projectionMatrix'] = cam_obj[i].to_opencv()[1].flatten().tolist() # Unity need fx, fy, cy, cz from opencv component
+      calibs_json[vid_name]['worldToCameraMatrix'] = cam_obj[i].to_opengl()[0].flatten().tolist()  # Unity need Extrinsic(worldtocameramatrix) in OpenGL convention
+
+    calib_unity_out = join(self.path_to_calibration, 'calib', 'calib_manual_unity.json')
+    with open(calib_unity_out, 'w') as outfile:
+      json.dump(calibs_json, outfile)
 
   def visualize_2d_trajectory(self, tracking_1, tracking_2, all_tracking):
     fig, axes = plt.subplots(2, 2)
@@ -190,6 +218,7 @@ class SportVideo:
     axes[0, 1].set_title('cam_2')
     axes[0, 1].set_xlim(-100, self.w + 100)
     axes[0, 1].set_ylim(-100, self.h + 100)
+    all_tracking = traj_utils.interpolation(all_tracking)
     axes[1, 0].plot(all_tracking[:, 0], self.h - all_tracking[:, 1], '-o')
     axes[1, 0].set_title('cam_1 & cam_2')
     axes[1, 0].set_xlim(-100, self.w + 100)
@@ -200,3 +229,70 @@ class SportVideo:
     axes[1, 1].set_ylim(-100, self.h + 100)
     plt.show()
 
+  def split_trajectory(self, trajectory_3d, tracking):
+    '''
+    TBD : Split trajectory function later
+    Input : Trajectory_3d with tracking pair
+    Output : Splitted trajectory_3d with tracking pair
+      - Output shape : (n_trajectory, seq_len, features) ===> e.g. (1, )
+    '''
+    # This only the mock up version = Use every points w/o a segmentation.
+    trajectory = np.expand_dims(np.hstack((trajectory_3d, tracking)), axis=0)
+    return trajectory
+
+  def preprocess_save_to_npy(self, trajectory):
+    '''
+    Input shape = (n_trajectory, seq_len, features) ===> e.g. (1, )
+    Features cols = (x, y, z, u_c1, v_c1, u_c2, v_c2)
+    '''
+
+    print("[#] Saving 3D tracking by triangulation")
+    calibs = self.load_calibs(suffix='manual')
+    cam1 = calibs[self.video_name[0]]
+    cam1_obj = cam_utils.Camera(name='cam1', A=np.array(cam1['A']), R=np.array(cam1['R']), T=np.array(cam1['T']), h=cam1['H'], w=cam1['W'])
+    cam2 = calibs[self.video_name[1]]
+    cam2_obj = cam_utils.Camera(name='cam2', A=np.array(cam2['A']), R=np.array(cam2['R']), T=np.array(cam2['T']), h=cam2['H'], w=cam2['W'])
+
+    cam_list = [cam1_obj, cam2_obj]
+    trajectory_list = [[], []]
+    for i in range(trajectory.shape[0]):
+      # Unity convention
+      trajectory[i][:, [2]] *= -1
+      x, y, z = trajectory[i][:, [0]], trajectory[i][:, [1]], trajectory[i][:, [2]]
+      for j, cam in enumerate(cam_list):
+        if not self.args.use_tracking:
+          # Do a projection if tracking is not used as an input
+          trajectory_npy = []
+          u, v, d = transf_utils.project(cam=cam, pts=trajectory[i][..., [0, 1, 2]])
+          # print(max(u), max(v), min(u), min(v), max(d), min(d))
+          # plt.scatter(u, v)
+          # plt.axvline(x=cam1['W'])
+          # plt.axvline(x=0)
+          # plt.axhline(y=cam1['H'])
+          # plt.axhline(y=0)
+          # plt.show()
+        else:
+          trajectory_cam = transf_utils.transform_3d(m=cam.to_unity()[0], pts=trajectory[i][..., [0, 1, 2]], inv=False)
+          d = -trajectory_cam[:, [2]]   # Depth direction should be positive for unity
+          if j == 0:
+            u, v = trajectory[i][:, [3]], trajectory[i][:, [4]]
+          if j == 1:
+            u, v = trajectory[i][:, [5]], trajectory[i][:, [6]]
+
+          # For raw tracking, unity coordinates start from (0, 0) at the bottom left, so I need to remove with the height
+          v = cam.height - v
+
+        dummy_eot = np.zeros(shape=(x.shape))
+        saving_trajectory = np.concatenate((x, y, z, u, v, d, dummy_eot), axis=1)
+        saving_trajectory = np.vstack((saving_trajectory[0, :], np.diff(saving_trajectory, axis=0)))
+        trajectory_list[j].append(saving_trajectory)
+
+    for i, trajectory_cam in enumerate(trajectory_list):
+      trajectory_cam = np.array(trajectory_cam)
+      print("Camera {} : {}".format(i+1, trajectory_cam.shape))
+      # np.save(trajectory_cam)
+      # .npy format (For extracting 3d trajectory)
+      self.intiailize_folder(path="{}/{}".format(self.path_to_calibration, 'preprocessed_npy'))
+      preprocessed_npy = join(self.path_to_calibration, 'preprocessed_npy', 'trajectory_{}'.format(self.video_name[i]))
+      preprocessed_npy = join(self.path_to_calibration, 'preprocessed_npy', 'MixedTrajectory_Trial{}'.format(self.video_name[i][-1]))
+      np.save(preprocessed_npy, trajectory_cam)
