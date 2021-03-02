@@ -175,7 +175,8 @@ class SportVideo:
     tracking_2 = io.read_tracking(full_name=tracking_2, ext=tracking_2[-3:])
     all_tracking = np.concatenate((tracking_1, tracking_2), axis=1)
     # self.visualize_2d_trajectory(tracking_1, tracking_2, all_tracking)
-    tracking = traj_utils.interpolation(all_tracking)
+    tracking_dict = traj_utils.filter_points(all_tracking)
+    tracking = tracking_dict['all']['tracking_f']
     if flip:
       tracking[:, 2] = self.w - tracking[:, 2]    # Inverse the tracking for 2nd video
 
@@ -183,7 +184,7 @@ class SportVideo:
     # Output 3D trajectory is in Camera 1 coordinates, so we move it to world coordinates
     trajectory_3d[:, [1, 2]] *= -1 # Invert y-z axis
     trajectory_3d = transf_utils.transform_3d(m=cam1_obj.to_opengl()[0], pts=trajectory_3d[:, :-1], inv=True)
-    return trajectory_3d, tracking
+    return trajectory_3d, tracking_dict
 
   def convert_calibration_to_unity(self):
     print("[#] Convert the calibration to Unity (Json format)")
@@ -229,7 +230,7 @@ class SportVideo:
     axes[1, 1].set_ylim(-100, self.h + 100)
     plt.show()
 
-  def split_trajectory(self, trajectory_3d, tracking):
+  def split_trajectory(self, trajectory_3d, tracking_dict):
     '''
     TBD : Split trajectory function later
     Input : Trajectory_3d with tracking pair
@@ -237,8 +238,39 @@ class SportVideo:
       - Output shape : (n_trajectory, seq_len, features) ===> e.g. (1, )
     '''
     # This only the mock up version = Use every points w/o a segmentation.
-    trajectory = np.expand_dims(np.hstack((trajectory_3d, tracking)), axis=0)
-    return trajectory
+    idx_trajectory_3d = tracking_dict['all']['tracking_f'][..., [-1]]
+
+    x = trajectory_3d[:, 0]
+    y = trajectory_3d[:, 1]
+    z = trajectory_3d[:, 2]
+    diff_x = np.diff(x, axis=0)
+    diff_y = np.diff(y, axis=0)
+    diff_z = np.diff(z, axis=0)
+    threshold = 5
+    split_x = diff_x > threshold
+    split_y = diff_y > threshold
+    split_z = diff_z > threshold
+
+    split_idx = np.logical_or(np.logical_or(split_x, split_y), split_z)
+    split_idx = np.where(split_idx == True)
+    split_idx = np.concatenate((np.zeros(1), split_idx[0] + 1, np.array([trajectory_3d.shape[0]])))
+
+    trajectory_split = []
+    tracking_split = []
+    for idx in range(len(split_idx)-1):
+      start = int(split_idx[idx])
+      stop = int(split_idx[idx+1])
+      trajectory_split.append(trajectory_3d[start:stop, :])
+      tracking_split.append(tracking[start:stop, :])
+      print(idx_trajectory_3d[start:stop])
+
+    trajectory_split = np.array(trajectory_split)
+    tracking_split = np.array(tracking_split)
+    traj_and_track = [np.concatenate((trajectory_split[i], tracking_split[i]), axis=-1) for i in range(len(trajectory_split))]
+    traj_and_track = np.array(traj_and_track)
+    print(traj_and_track)
+    exit()
+    return traj_and_track
 
   def preprocess_save_to_npy(self, trajectory):
     '''
@@ -264,13 +296,6 @@ class SportVideo:
           # Do a projection if tracking is not used as an input
           trajectory_npy = []
           u, v, d = transf_utils.project(cam=cam, pts=trajectory[i][..., [0, 1, 2]])
-          # print(max(u), max(v), min(u), min(v), max(d), min(d))
-          # plt.scatter(u, v)
-          # plt.axvline(x=cam1['W'])
-          # plt.axvline(x=0)
-          # plt.axhline(y=cam1['H'])
-          # plt.axhline(y=0)
-          # plt.show()
         else:
           trajectory_cam = transf_utils.transform_3d(m=cam.to_unity()[0], pts=trajectory[i][..., [0, 1, 2]], inv=False)
           d = -trajectory_cam[:, [2]]   # Depth direction should be positive for unity
