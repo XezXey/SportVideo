@@ -49,8 +49,8 @@ def filter_points(all_tracking, method=None):
     tracking_cam2 = all_tracking_cam2[~np.isnan(tracking_cam2).any(axis=1)]
 
 
-  tracking_dict = {'all':{'mask':masking_all_cam, 'tracking_f':tracking_all_cam, 'tracking_nf':tracking_all_cam},
-              'cam1':{'mask':masking_cam1, 'tracking_f':tracking_cam1, 'tracking_nf':tracking_cam1},
-              'cam2':{'mask':masking_cam2, 'tracking_f':tracking_cam2, 'tracking_nf':tracking_cam2},}
+  tracking_dict = {'all':{'mask':masking_all_cam, 'tracking_f':tracking_all_cam, 'tracking_nf':all_tracking},
+                   'cam1':{'mask':masking_cam1, 'tracking_f':tracking_cam1, 'tracking_nf':all_tracking[..., [0, 1, -1]]},
+                   'cam2':{'mask':masking_cam2, 'tracking_f':tracking_cam2, 'tracking_nf':all_tracking[..., [2, 3, -1]]},}
 
   return tracking_dict

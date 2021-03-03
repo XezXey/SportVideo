@@ -7,6 +7,10 @@ from os.path import isfile, join, exists
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 # import calibration
 from SportVideo import calibration
 
@@ -237,8 +241,8 @@ class SportVideo:
     Output : Splitted trajectory_3d with tracking pair
       - Output shape : (n_trajectory, seq_len, features) ===> e.g. (1, )
     '''
-    # This only the mock up version = Use every points w/o a segmentation.
-    idx_trajectory_3d = tracking_dict['all']['tracking_f'][..., [-1]]
+    # This will find the idx of row that we use in triangulation
+    matching_idx = tracking_dict['all']['tracking_f'][..., [-1]]
 
     x = trajectory_3d[:, 0]
     y = trajectory_3d[:, 1]
@@ -256,25 +260,98 @@ class SportVideo:
     split_idx = np.concatenate((np.zeros(1), split_idx[0] + 1, np.array([trajectory_3d.shape[0]])))
 
     trajectory_split = []
-    tracking_split = []
-    for idx in range(len(split_idx)-1):
-      start = int(split_idx[idx])
-      stop = int(split_idx[idx+1])
-      trajectory_split.append(trajectory_3d[start:stop, :])
-      tracking_split.append(tracking[start:stop, :])
-      print(idx_trajectory_3d[start:stop])
+    tracking_split_all = []
+    tracking_split_cam1 = []
+    tracking_split_cam2 = []
 
-    trajectory_split = np.array(trajectory_split)
-    tracking_split = np.array(tracking_split)
-    traj_and_track = [np.concatenate((trajectory_split[i], tracking_split[i]), axis=-1) for i in range(len(trajectory_split))]
+    for idx in range(len(split_idx)-1):
+      # [start, end)
+      start = int(split_idx[idx])
+      end = int(split_idx[idx+1])
+      # Directly acces at end ===> end - 1 since index start from 0
+      matching_idx_start = int(matching_idx[start])
+      matching_idx_end = int(matching_idx[end-1]) + 1   # +1 because we use as an exclusive below
+
+      # 3D Trajectory data
+      trajectory_split.append(trajectory_3d[start:end, :])
+
+      # Tracking data
+      # Leave nan value in the data
+      # All cam
+      # tracking_split_all.append(tracking_dict['all']['tracking_nf'][matching_idx_start:matching_idx_end, :])
+      each_all_cam = tracking_dict['all']['tracking_f'][start:end, :]
+      tracking_split_all.append(each_all_cam)
+      # print(tracking_split_all[idx])
+      # print(matching_idx_start, matching_idx_end)
+      # print(start, end)
+
+      # Camera 1
+      each_cam1 = tracking_dict['cam1']['tracking_nf'][matching_idx_start:matching_idx_end, :]
+      tracking_split_cam1.append(each_cam1)
+      # print(tracking_split_cam1[idx])
+      # print(matching_idx_start, matching_idx_end)
+      # print(start, end)
+
+      # Camera 2
+      each_cam2 = tracking_dict['cam2']['tracking_nf'][matching_idx_start:matching_idx_end, :]
+      tracking_split_cam2.append(each_cam2)
+      # print(tracking_split_cam2[idx])
+      # print(matching_idx_start, matching_idx_end)
+      # print(start, end)
+
+    tracking_split_all = np.array(tracking_split_all)
+    # Concatenate into traj_and_track = (x, y, z, u_c1, v_c1, u_c2, v_c2, matching_idx)
+    traj_and_track = [np.concatenate((np.zeros(shape=(tracking_split_cam1[i].shape[0], 3)), tracking_split_cam1[i][:, :-1], tracking_split_cam2[i]), axis=-1) for i in range(len(tracking_split_cam1))]
+
+    print("#"*100)
+    print("#"*100)
+    print("#"*100)
+    # Assign 3D trajectory row to tracking from cam1 and cam2
+    for traj_idx, each_trajectory in enumerate(trajectory_split):
+      print("[#] Tracking cam1&cam2 shape : ", traj_and_track[traj_idx].shape)
+      print("[#] Trajectory 3D shape : ", each_trajectory.shape)
+      #####################
+      ### Tracking cam1 ###
+      #####################
+      smaller_row_idx = 0
+      for row_idx in range(traj_and_track[traj_idx].shape[0]):
+        # print("TRACKING CAM2 MATCHING: ", tracking_split_cam1[traj_idx][row_idx, -1])
+        # print("TRACKING CAM1 MATCHING: ", tracking_split_cam2[traj_idx][row_idx, -1])
+        # print("3D MATCHING : ", tracking_split_all[traj_idx][smaller_row_idx, -1])
+        if traj_and_track[traj_idx][row_idx, -1] == tracking_split_all[traj_idx][smaller_row_idx, -1]:
+          # Compare the index
+          # print("[#] MATCHED!!!")
+          # print("ROW IN traj_and_track_cam1 : ", row_idx)
+          # print("ROW IN tracking_split_all : ", smaller_row_idx)
+          traj_and_track[traj_idx][row_idx, [0, 1, 2]] = each_trajectory[smaller_row_idx]
+          smaller_row_idx += 1
+
     traj_and_track = np.array(traj_and_track)
-    print(traj_and_track)
-    exit()
     return traj_and_track
 
-  def preprocess_save_to_npy(self, trajectory):
+  def visualize_tracking_along_3d(self, traj_and_track):
     '''
-    Input shape = (n_trajectory, seq_len, features) ===> e.g. (1, )
+    column convention : (x, y, z, u_c1, v_c1, u_c2, v_c2, idx)
+    '''
+    for traj in traj_and_track:
+      traj[..., [0, 1, 2]] = np.where(traj[..., [0, 1, 2]] == 0, np.nan, traj[..., [0, 1, 2]])
+      x = traj[:, 0]
+      y = traj[:, 1]
+      z = traj[:, 2]
+      u_c1 = traj[:, 3]
+      v_c1 = traj[:, 4]
+      u_c2 = traj[:, 5]
+      v_c2 = traj[:, 6]
+      fig = make_subplots(rows=1, cols=2, specs=[[{'type':'scatter3d'}, {'type':'scatter'}]])
+      fig.add_trace(go.Scatter3d(x=x, y=y, z=z, name='3D trajectory'), row=1, col=1)
+      fig.add_trace(go.Scatter(x=u_c1, y=v_c1, name='uv cam1'), row=1, col=2)
+      fig.add_trace(go.Scatter(x=u_c2, y=v_c2, name='uv cam2'), row=1, col=2)
+      fig.show()
+      input('Continue...')
+
+  def preprocess_save_to_npy(self, traj_and_track):
+    '''
+    Input shape = (n_traj_and_track, seq_len, features) ===> e.g. (1, )
     Features cols = (x, y, z, u_c1, v_c1, u_c2, v_c2)
     '''
 
@@ -286,33 +363,45 @@ class SportVideo:
     cam2_obj = cam_utils.Camera(name='cam2', A=np.array(cam2['A']), R=np.array(cam2['R']), T=np.array(cam2['T']), h=cam2['H'], w=cam2['W'])
 
     cam_list = [cam1_obj, cam2_obj]
-    trajectory_list = [[], []]
-    for i in range(trajectory.shape[0]):
+    traj_and_track_list = [[], []]
+    for i in range(traj_and_track.shape[0]):
       # Unity convention
-      trajectory[i][:, [2]] *= -1
-      x, y, z = trajectory[i][:, [0]], trajectory[i][:, [1]], trajectory[i][:, [2]]
+      traj_and_track[i][:, [2]] *= -1
+      x, y, z = traj_and_track[i][:, [0]], traj_and_track[i][:, [1]], traj_and_track[i][:, [2]]
       for j, cam in enumerate(cam_list):
-        if not self.args.use_tracking:
-          # Do a projection if tracking is not used as an input
-          trajectory_npy = []
-          u, v, d = transf_utils.project(cam=cam, pts=trajectory[i][..., [0, 1, 2]])
-        else:
-          trajectory_cam = transf_utils.transform_3d(m=cam.to_unity()[0], pts=trajectory[i][..., [0, 1, 2]], inv=False)
-          d = -trajectory_cam[:, [2]]   # Depth direction should be positive for unity
+        # Use a tracking file
+        if self.args.use_tracking:
+          traj_and_track_cam = transf_utils.transform_3d(m=cam.to_unity()[0], pts=traj_and_track[i][..., [0, 1, 2]], inv=False)
+          d = -traj_and_track_cam[:, [2]]   # Depth direction should be positive for unity
           if j == 0:
-            u, v = trajectory[i][:, [3]], trajectory[i][:, [4]]
+            u, v = traj_and_track[i][:, [3]], traj_and_track[i][:, [4]]
           if j == 1:
-            u, v = trajectory[i][:, [5]], trajectory[i][:, [6]]
+            u, v = traj_and_track[i][:, [5]], traj_and_track[i][:, [6]]
+        else:
+        # Use a projection from 3d instead
+          # Do a projection if tracking is not used as an input
+          traj_and_track_npy = []
+          u, v, d = transf_utils.project(cam=cam, pts=traj_and_track[i][..., [0, 1, 2]])
 
           # For raw tracking, unity coordinates start from (0, 0) at the bottom left, so I need to remove with the height
           v = cam.height - v
 
         dummy_eot = np.zeros(shape=(x.shape))
-        saving_trajectory = np.concatenate((x, y, z, u, v, d, dummy_eot), axis=1)
+        # Create a missing mask with convention : 1=Missing, 0=Visible
+        missing_mask = np.zeros(shape=u.shape)
+        missing_idx = np.where(np.isnan(u))[0]
+        missing_mask[missing_idx] = 1
+        # Replacing u, v with 0 before concatenate and compute a displacement
+        u_rep = np.where(np.isnan(u), 0, u)
+        v_rep = np.where(np.isnan(v), 0, v)
+        saving_trajectory = np.concatenate((x, y, z, u_rep, v_rep, d, dummy_eot), axis=1)
         saving_trajectory = np.vstack((saving_trajectory[0, :], np.diff(saving_trajectory, axis=0)))
-        trajectory_list[j].append(saving_trajectory)
+        print("[#] Sanity check : Cumsum from replacing nan with 0 => ", np.all(np.cumsum(saving_trajectory, axis=0)[:, 3] == u_rep.reshape(-1)))
+        print("[#] Sanity check : Cumsum from replacing nan with 0 => ", np.all(np.cumsum(saving_trajectory, axis=0)[:, 4] == v_rep.reshape(-1)))
+        saving_trajectory = np.concatenate((saving_trajectory, missing_mask), axis=-1)
+        traj_and_track_list[j].append(saving_trajectory)
 
-    for i, trajectory_cam in enumerate(trajectory_list):
+    for i, trajectory_cam in enumerate(traj_and_track_list):
       trajectory_cam = np.array(trajectory_cam)
       print("Camera {} : {}".format(i+1, trajectory_cam.shape))
       # np.save(trajectory_cam)
