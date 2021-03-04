@@ -65,6 +65,7 @@ def is_cap_open(cap_list):
 
 
 def read_tracking(track_list):
+  print("[#] Read tracking list")
   tracking = []
   for track in track_list:
     print(track)

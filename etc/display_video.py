@@ -11,8 +11,8 @@ from visualize import visualize
 parser = argparse.ArgumentParser()
 parser.add_argument('--video_path', type=str, required=True)
 parser.add_argument('--video_ext', type=str, required=True)
-parser.add_argument('--tracking_path', type=str, default=None)
-parser.add_argument('--tracking_ext', type=str, default=None)
+parser.add_argument('--tracking_path', type=str, default=None, required=True)
+parser.add_argument('--tracking_ext', type=str, default=None, required=True)
 args = parser.parse_args()
 
 if __name__ == '__main__':

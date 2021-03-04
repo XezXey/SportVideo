@@ -326,6 +326,7 @@ class SportVideo:
           traj_and_track[traj_idx][row_idx, [0, 1, 2]] = each_trajectory[smaller_row_idx]
           smaller_row_idx += 1
 
+
     traj_and_track = np.array(traj_and_track)
     return traj_and_track
 
@@ -377,14 +378,20 @@ class SportVideo:
             u, v = traj_and_track[i][:, [3]], traj_and_track[i][:, [4]]
           if j == 1:
             u, v = traj_and_track[i][:, [5]], traj_and_track[i][:, [6]]
+
+          # For raw tracking, unity coordinates start from (0, 0) at the bottom left, so I need to remove with the height
+          v = cam.height - v
+
         else:
         # Use a projection from 3d instead
           # Do a projection if tracking is not used as an input
           traj_and_track_npy = []
           u, v, d = transf_utils.project(cam=cam, pts=traj_and_track[i][..., [0, 1, 2]])
-
-          # For raw tracking, unity coordinates start from (0, 0) at the bottom left, so I need to remove with the height
-          v = cam.height - v
+          mask_from_3d = ~np.all(np.isclose(traj_and_track[i][..., [0, 1, 2]], 0.0), axis=-1).reshape(-1, 1)
+          mask_from_3d = np.where(np.isclose(mask_from_3d, 0.0), np.nan, mask_from_3d)
+          u = u * mask_from_3d
+          v = v * mask_from_3d
+          d = d * mask_from_3d
 
         dummy_eot = np.zeros(shape=(x.shape))
         # Create a missing mask with convention : 1=Missing, 0=Visible
@@ -394,11 +401,15 @@ class SportVideo:
         # Replacing u, v with 0 before concatenate and compute a displacement
         u_rep = np.where(np.isnan(u), 0, u)
         v_rep = np.where(np.isnan(v), 0, v)
-        saving_trajectory = np.concatenate((x, y, z, u_rep, v_rep, d, dummy_eot), axis=1)
+        d_rep = np.where(np.isnan(d), 0, d)
+        saving_trajectory = np.concatenate((x, y, z, u_rep, v_rep, d_rep, dummy_eot), axis=1)
+        print(saving_trajectory[:, [0, 1, 2]])
         saving_trajectory = np.vstack((saving_trajectory[0, :], np.diff(saving_trajectory, axis=0)))
+        print(saving_trajectory[:, [0, 1, 2]])
         print("[#] Sanity check : Cumsum from replacing nan with 0 => ", np.all(np.cumsum(saving_trajectory, axis=0)[:, 3] == u_rep.reshape(-1)))
         print("[#] Sanity check : Cumsum from replacing nan with 0 => ", np.all(np.cumsum(saving_trajectory, axis=0)[:, 4] == v_rep.reshape(-1)))
         saving_trajectory = np.concatenate((saving_trajectory, missing_mask), axis=-1)
+        print(saving_trajectory[:, [0, 1, 2]])
         traj_and_track_list[j].append(saving_trajectory)
 
     for i, trajectory_cam in enumerate(traj_and_track_list):
